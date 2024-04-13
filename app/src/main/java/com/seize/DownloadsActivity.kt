@@ -1,6 +1,6 @@
 package com.seize
 
-import Youtubep
+import Interact
 import android.content.Context
 import android.content.Intent
 import android.media.MediaScannerConnection
@@ -498,7 +498,7 @@ class DownloadsActivity : AppCompatActivity(),Adapter.OnItemClickListener {
               }
           )
         }
-        private val  scrapper=Youtubep()
+        private val  scrapper=Interact()
         fun InstagramVideo(video:MutableList<JSONObject>,context: Context){
             for(v in video){
                 if(v.getBoolean("is_video")){

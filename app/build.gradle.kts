@@ -52,4 +52,7 @@ dependencies {
     implementation(files("libs/ffmpeg.aar"))
     implementation("com.arthenica:smart-exception-java:0.2.1")
     implementation("org.jsoup:jsoup:1.14.3")
+    implementation("io.ktor:ktor-http:1.4.3")
+
+
 }

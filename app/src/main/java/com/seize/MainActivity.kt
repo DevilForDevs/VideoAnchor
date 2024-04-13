@@ -1,16 +1,16 @@
 package com.seize
 
 
-import Youtubep
+import Interact
 import android.Manifest
 import android.annotation.SuppressLint
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
-import android.os.Handler
-import android.os.Looper
+import android.util.Patterns
 import android.view.View
+import android.webkit.URLUtil
 import android.widget.ArrayAdapter
 import android.widget.ImageButton
 import android.widget.ListView
@@ -33,9 +33,7 @@ import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONObject
-import java.io.BufferedInputStream
 import java.io.File
-import java.io.FileOutputStream
 import java.net.URL
 import java.net.URLDecoder
 import java.net.URLEncoder
@@ -46,12 +44,13 @@ class MainActivity : AppCompatActivity(),AdapterMain.OnItemClickListener {
     var recyclerView:RecyclerView?=null
     var adapter:AdapterMain?=null
     var model_list_= mutableListOf<JSONObject>()
-    val scrapper=Youtubep()
+    val scrapper=Interact()
     var progressBar:ProgressBar?=null
     var canMakeRequest=true
     var continuationToken:String?=null
     var queryTerm: String? =null
     var canLoadMore=false
+    var isPlaylist=false
     var itemsL = mutableListOf<JSONObject>()
     var goToDownloadsActivity:ImageButton?=null
     private val videoIdAdded= mutableListOf<String>()
@@ -88,50 +87,52 @@ class MainActivity : AppCompatActivity(),AdapterMain.OnItemClickListener {
             override fun onQueryTextChange(newText: String?): Boolean {
                 if (newText.toString().isNotEmpty()&&canMakeRequest){
                     val newTextString = newText.toString()
-                    val instaId = extractInstagramVideoId(newTextString)
-                    val youtubeId = videoId(newTextString)
-                    if (instaId != null) {
-                        println("instagram video")
-                        progressBar!!.visibility = View.VISIBLE
-                        coroutineToGetJson.launch{
-                            try {
-                                val infoJson=instagram(instaId)
-                                withContext(Dispatchers.Main) {
-                                    progressBar!!.visibility=View.GONE
-                                    searchView.setQuery("", false)
-                                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                                        DownloadsActivity.InstagramVideo(infoJson,applicationContext)
-                                        Toast.makeText(applicationContext,"Added To Downloads",Toast.LENGTH_SHORT).show()
-                                    }else{
-                                        if (ContextCompat.checkSelfPermission(
-                                                this@MainActivity,
-                                                Manifest.permission.WRITE_EXTERNAL_STORAGE
-                                            ) != PackageManager.PERMISSION_GRANTED
-                                        ) {
-                                            itemsL=infoJson
-                                            val permission = Manifest.permission.WRITE_EXTERNAL_STORAGE
-                                            ActivityCompat.requestPermissions(this@MainActivity, arrayOf(permission), 1)
-                                        }else{
+                    val isValid = URLUtil.isValidUrl(newTextString) && Patterns.WEB_URL.matcher(newTextString).matches()
+                    if (isValid){
+                        val instaId = extractInstagramVideoId(newTextString)
+                        val youtubeId = videoId(newTextString)
+                        val playlistId=getPlaylistId(newTextString)
+                        if (instaId!=null){
+                            println("instagram video")
+                            progressBar!!.visibility = View.VISIBLE
+                            coroutineToGetJson.launch{
+                                try {
+                                    val infoJson=instagram(instaId)
+                                    withContext(Dispatchers.Main) {
+                                        progressBar!!.visibility=View.GONE
+                                        searchView.setQuery("", false)
+                                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                                             DownloadsActivity.InstagramVideo(infoJson,applicationContext)
                                             Toast.makeText(applicationContext,"Added To Downloads",Toast.LENGTH_SHORT).show()
+                                        }else{
+                                            if (ContextCompat.checkSelfPermission(
+                                                    this@MainActivity,
+                                                    Manifest.permission.WRITE_EXTERNAL_STORAGE
+                                                ) != PackageManager.PERMISSION_GRANTED
+                                            ) {
+                                                itemsL=infoJson
+                                                val permission = Manifest.permission.WRITE_EXTERNAL_STORAGE
+                                                ActivityCompat.requestPermissions(this@MainActivity, arrayOf(permission), 1)
+                                            }else{
+                                                DownloadsActivity.InstagramVideo(infoJson,applicationContext)
+                                                Toast.makeText(applicationContext,"Added To Downloads",Toast.LENGTH_SHORT).show()
+                                            }
                                         }
                                     }
-                                }
-                            }catch (e:Exception){
-                                runOnUiThread {
-                                    progressBar!!.visibility=View.GONE
-                                    Toast.makeText(applicationContext,"Streaming data not found",Toast.LENGTH_SHORT).show()
+                                }catch (e:Exception){
+                                    runOnUiThread {
+                                        progressBar!!.visibility=View.GONE
+                                        Toast.makeText(applicationContext,"Streaming data not found",Toast.LENGTH_SHORT).show()
+                                    }
                                 }
                             }
                         }
-                    } else {
-                        val youtubeId = videoId(newTextString)
-                        println(youtubeId)
-                        if (youtubeId != null) {
+                        if (youtubeId!=null){
+                            println(youtubeId)
                             progressBar!!.visibility=View.VISIBLE
                             coroutineToGetJson.launch{
                                 try {
-                                    val infoJson=scrapper.getJson(youtubeId)
+                                    val infoJson=scrapper.getStreamingData(youtubeId)
                                     withContext(Dispatchers.Main) {
                                         progressBar!!.visibility=View.GONE
                                         searchView.setQuery("", false)
@@ -146,43 +147,50 @@ class MainActivity : AppCompatActivity(),AdapterMain.OnItemClickListener {
                                     }
                                 }
                             }
-                        } else {
-                            if (newTextString!=""){
-                                progressBar!!.visibility = View.VISIBLE
-                                model_list_.clear()
-                                adapter!!.notifyDataSetChanged()
-                                println("getting results")
-                                canMakeRequest = false
-                                coroutToSearch.launch {
-                                   try {
-                                       val results = scrapper.search(newTextString, null)
-                                       val suggestions = results.third
-                                       for (i in suggestions) {
-                                           val itemSuggestion = JSONObject()
-                                           itemSuggestion.put("suggestion", i)
-                                           model_list_.add(itemSuggestion)
-                                       }
-                                       withContext(Dispatchers.Main) {
-                                           adapter!!.notifyDataSetChanged()
-                                           progressBar!!.visibility = View.GONE
-                                           canMakeRequest = true
-                                       }
-                                   }catch (e:Exception){
-                                       runOnUiThread {
-                                           Toast.makeText(applicationContext, "Failed to get result", Toast.LENGTH_SHORT).show()
-                                           progressBar!!.visibility = View.GONE
-                                       }
+                        }else{
+                            Toast.makeText(applicationContext,"Unable to prase video id",Toast.LENGTH_SHORT).show()
+                        }
+                        if (playlistId!=null){
+                            isPlaylist = true
+                            searchView.setQuery("", false)
+                            fromPlaylist(newTextString)
+                        }
+                    }else{
+                        progressBar!!.visibility = View.VISIBLE
+                        model_list_.clear()
+                        adapter!!.notifyDataSetChanged()
+                        println("getting results")
+                        canMakeRequest = false
+                        coroutToSearch.launch {
+                            try {
+                                val results = scrapper.search(newTextString, null)
+                                val suggestions = results?.third
+                                if (suggestions != null) {
+                                    for (vu in 0..<suggestions.length()) {
+                                        val itemSuggestion = JSONObject()
+                                        itemSuggestion.put("suggestion", suggestions.get(vu))
+                                        model_list_.add(itemSuggestion)
 
-                                   }
+                                    }
+                                }
+                                withContext(Dispatchers.Main) {
+                                    adapter!!.notifyDataSetChanged()
+                                    progressBar!!.visibility = View.GONE
+                                }
+                            }catch (e:Exception){
+                                runOnUiThread {
+                                    Toast.makeText(applicationContext, "Failed to get result", Toast.LENGTH_SHORT).show()
+                                    searchView.setQuery("", false)
+                                    progressBar!!.visibility = View.GONE
                                 }
 
-
-                            }else{
-                                println("uselaess string")
                             }
-
                         }
                     }
+
+
+
+
 
                 }
                 return true
@@ -198,19 +206,116 @@ class MainActivity : AppCompatActivity(),AdapterMain.OnItemClickListener {
                 if ((visibleItemCount + firstVisibleItemPosition) >= totalItemCount
                     && firstVisibleItemPosition >= 0
                 ) {
-                    if (continuationToken!=null&&canLoadMore){
-                        canLoadMore=false
-                        println("loading more")
-                        search()
+                    println("loading more")
+                    println(continuationToken)
+                    if (continuationToken!=null){
+                        if (isPlaylist){
+                            playlistFromCotninuation()
+                        }else{
+                            search()
+                        }
                     }
                 }
             }
         })
 
     }
+    fun isCombinationOfWords(string: String): Boolean {
+        val words = string.split("\\s+".toRegex())
+        return words.size > 1 || (words.size == 1 && words[0].length > 1)
+    }
+    fun playlistFromCotninuation(){
+        progressBar!!.visibility=View.VISIBLE
+        coroutToSearch.launch {
+            var videos: List<JSONObject>? = null
+            try {
+                val result = withContext(Dispatchers.IO) {
+                    scrapper.playlist(continuationToken)
+                }
+                if (result == null) {
+                    withContext(Dispatchers.Main){
+                        progressBar!!.visibility = View.GONE
+                        println("Reached end")
+                        Toast.makeText(applicationContext, "Reached End", Toast.LENGTH_SHORT).show()
+                    }
+                }else{
+                    videos = result.first
+                }
+                if (result != null) {
+                    continuationToken = result.second
+                }
+               withContext(Dispatchers.Main){
+                   if (videos != null) {
+                       setToUi(videos)
+                   }
+               }
+            }catch (e:Exception){
+                runOnUiThread {
+                    Toast.makeText(applicationContext, "Failed to get result", Toast.LENGTH_SHORT).show()
+                    progressBar!!.visibility = View.GONE
+                }
+            }
+        }
+    }
+    fun fromPlaylist(url: String){
+        progressBar!!.visibility=View.VISIBLE
+        model_list_.clear()
+        adapter?.notifyDataSetChanged()
+        coroutToSearch.launch {
+            var videos: List<JSONObject>? = null
+            try {
+                val result = withContext(Dispatchers.IO) {
+                    scrapper.getPlayListItemsFromHtml(url)
+                }
+                if (result != null) {
+                    videos = result.first
+                }
+                if (result != null) {
+                    continuationToken = result.second
+                }
+                if (videos != null) {
+                    println(videos.size)
+                }
+                if (videos != null) {
+                    for (video in videos) {
+                        video.put("result", true)
+                        model_list_.add(video)
+                    }
+                }
+                withContext(Dispatchers.Main){
+                    if (videos != null) {
+                        setToUi(videos)
+                    }
+                }
+            }catch (e:Exception){
+                runOnUiThread {
+                    Toast.makeText(applicationContext, "Failed to get result", Toast.LENGTH_SHORT).show()
+                    progressBar!!.visibility = View.GONE
+                }
+            }
+        }
+    }
 
+    private fun getPlaylistId(newTextString: String): String? {
+        val parsedUrl = URL(newTextString)
+        val query = parsedUrl.query ?: return null
+        val parameters = query.split("&").associate {
+            val (key, value) = it.split("=")
+            key to value
+        }
+        return parameters["list"]
 
+    }
 
+    fun isUrl(url: String): Boolean {
+        try {
+            URL(url)
+            return true
+        }catch (e:Exception){
+            println(e)
+        }
+       return false
+    }
     override fun onItemClick(position: Int, item: JSONObject) {
         if (item.has("suggestion")){
             continuationToken=null
@@ -401,7 +506,7 @@ class MainActivity : AppCompatActivity(),AdapterMain.OnItemClickListener {
         progressBar!!.visibility=View.VISIBLE
         coroutineToGetJson.launch{
             try {
-                val infoJson=scrapper.getJson(item.getString("videoId"))
+                val infoJson=scrapper.getStreamingData(item.getString("videoId"))
                 withContext(Dispatchers.Main) {
                     progressBar!!.visibility=View.GONE
                     if (infoJson!=null){
@@ -418,6 +523,24 @@ class MainActivity : AppCompatActivity(),AdapterMain.OnItemClickListener {
             }
         }
     }
+    private fun setToUi(videos:List<JSONObject>){
+        val startIndex=model_list_.size
+        val folder = File("${this@MainActivity.filesDir}/thumbnail")
+        if (!folder.exists()) {
+            folder.mkdir()
+        }
+        for (v in videos){
+            val thumb=v.getString("thumbnail")
+            val cleanedUrl = thumb.replace("\\/", "/")
+            v.put("thumbnail",cleanedUrl)
+            println(cleanedUrl)
+            println(v.getString("title"))
+            v.put("result",true)
+            model_list_.add(v)
+        }
+        adapter?.notifyItemRangeInserted(startIndex, videos.size)
+        progressBar!!.visibility = View.GONE
+    }
     private fun search() {
         if (queryTerm != null) {
             progressBar!!.visibility=View.VISIBLE
@@ -427,53 +550,18 @@ class MainActivity : AppCompatActivity(),AdapterMain.OnItemClickListener {
                 try {
                     val result = withContext(Dispatchers.IO) {
                         scrapper.search(queryTerm!!, continuationToken)
-                    }
-                    videos = result.first
-                    continuationToken = result.second
-                    val folder = File("${this@MainActivity.filesDir}/thumbnail")
-                    if (!folder.exists()) {
-                        folder.mkdir()
-                    }
-                    if (videos != null) {
-                        for (video in videos) {
-                            val title = video["videoId"]
-                            val thumbnail = video.getString("thumbnail")
-                            val f = File(folder, "$title.jpg")
-                            val th = Thread() {
-                                try {
-                                    val d_url = URL(thumbnail)
-                                    val bis = BufferedInputStream(d_url.openStream())
-                                    var count = 0
-                                    val b = ByteArray(1024)
-                                    val fos = FileOutputStream(f)
-                                    while (bis.read(b).also { count = it } != -1) {
-                                        fos.write(b, 0, count)
-                                    }
-                                } catch (e: java.io.IOException) {
-                                    e.printStackTrace()
-                                }
-                                val handler = Handler(Looper.getMainLooper())
-                                val myRunnable = Runnable {
-                                    video.put("thumbnail", f.absolutePath)
-                                    video.put("result",true)
-                                    if (video.getString("videoId") in videoIdAdded) {
-                                        println("duplicated${video.getString("title")}")
-                                    } else {
-                                        videoIdAdded.add(video.getString("videoId"))
-                                        model_list_.add(video)
-                                        adapter?.notifyItemInserted(model_list_.size - 1)
-                                        if (videos.indexOf(video) == 0) {
-                                            progressBar!!.visibility=View.GONE
-                                        }
-                                        if (videos.indexOf(video) == videos.size - 1) {
-                                            canLoadMore = true
-                                        }
-                                    }
-                                }
 
-                                handler.post(myRunnable)
-                            }.start()
-
+                    }
+                    canLoadMore=true
+                    if (result != null) {
+                        videos = result.first
+                    }
+                    if (result != null) {
+                        continuationToken = result.second
+                    }
+                    withContext(Dispatchers.Main){
+                        if (videos != null) {
+                            setToUi(videos)
                         }
                     }
                 }catch (e:Exception){
@@ -487,9 +575,13 @@ class MainActivity : AppCompatActivity(),AdapterMain.OnItemClickListener {
         }
     }
     private fun videoId(url: String): String? {
-        val regex = Regex("(?:v=|\\/)([0-9A-Za-z_-]{11}).*")
+        val regex = """^.*(?:(?:youtu\.be\/|v\/|vi\/|u\/\w\/|embed\/|shorts\/|live\/)|(?:(?:watch)?\?v(?:i)?=|\&v(?:i)?=))([^#\&\?]*).*""".toRegex()
         val matchResult = regex.find(url)
-        return matchResult?.groups?.get(1)?.value
+        if (matchResult != null) {
+            val videoId = matchResult.groupValues[1]
+            return videoId
+        }
+        return null
     }
     fun extractInstagramVideoId(url: String): String? {
         val pattern = "(?:https?:\\/\\/)?(?:www\\.)?instagram\\.com\\/?([a-zA-Z0-9\\.\\_\\-]+)?\\/([p]+)?([reel]+)?([tv]+)?([stories]+)?\\/([a-zA-Z0-9\\-\\_\\.]+)\\/?([0-9]+)?"
@@ -506,7 +598,7 @@ class MainActivity : AppCompatActivity(),AdapterMain.OnItemClickListener {
 
         /*2b0673e0dc4580674a88d426fe00ea90*/
         /*9f8827793ef34641b2fb195d4d41151c*/
-       /* val queryHash = "2b0673e0dc4580674a88d426fe00ea90"*/
+        /* val queryHash = "2b0673e0dc4580674a88d426fe00ea90"*/
         try {
             val queryHash = "9f8827793ef34641b2fb195d4d41151c"
 
@@ -565,12 +657,12 @@ class MainActivity : AppCompatActivity(),AdapterMain.OnItemClickListener {
                 for (i in 0..<edgesArray.length()) {
                     val item=JSONObject()
                     val edgeObject = edgesArray.getJSONObject(i)
-                   /* if (edges != null) {
-                        if(edges.length()!=0){
-                            val ege1=edges.getJSONObject(0)
-                            val nd=ege1.getJSONObject("node")
-                            item.put("title","InstagramVideo($vid)$i")
-                            *//* if (nd.toString().contains("text")){
+                    /* if (edges != null) {
+                         if(edges.length()!=0){
+                             val ege1=edges.getJSONObject(0)
+                             val nd=ege1.getJSONObject("node")
+                             item.put("title","InstagramVideo($vid)$i")
+                             *//* if (nd.toString().contains("text")){
                                                  item.put("title","InstagramVideo($vid)")
                                                  *//**//*item.put("title",nd.get("text"))*//**//*
                                                 }*//**//*else{
@@ -642,4 +734,3 @@ class MainActivity : AppCompatActivity(),AdapterMain.OnItemClickListener {
         return "$baseUrl?$queryString"
     }
 }
-

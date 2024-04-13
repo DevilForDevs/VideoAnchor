@@ -9,10 +9,18 @@ import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.recyclerview.widget.RecyclerView
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.json.JSONObject
+import java.io.BufferedInputStream
 import java.io.File
+import java.io.FileOutputStream
+import java.net.URL
 
 class AdapterMain(private val context: Context, private val modelList: List<JSONObject>, private val clickListener: OnItemClickListener) : RecyclerView.Adapter<RecyclerView.ViewHolder>(), View.OnClickListener {
+    private val coroutineToGetJson = CoroutineScope(Dispatchers.IO)
     interface OnItemClickListener {
         fun onItemClick(position: Int, item: JSONObject)
         fun onImageViewClick(position: Int, item: JSONObject)
@@ -41,19 +49,54 @@ class AdapterMain(private val context: Context, private val modelList: List<JSON
         if (holder.itemViewType==2){
             val item=modelList[position]
             val  holderView=holder as Results
-            holderView.text.text = item.getString("title")
-            holderView.progress.text = item.getString("duration")
-            val thumbnail=File(item.getString("thumbnail"))
-            if (thumbnail.exists()){
-                val bitMapImage = BitmapFactory.decodeFile(item.getString("thumbnail"))
-                holderView.images.setImageBitmap(bitMapImage)
-            }else{
-                val bitmap = BitmapFactory.decodeResource(context.resources, R.drawable.ic_launcher_foreground)
-                holderView.images.setImageBitmap(bitmap)
+            if (item.has("title")){
+                holderView.text.text = item.getString("title")
+                val videoId=item.getString("videoId")
+                holderView.progress.text = item.getString("duration")
+                val folder = File("${context.filesDir}/thumbnail")
+                val f = File(folder, "$videoId.jpg")
+                coroutineToGetJson.launch {
+                    val thumbnail=getThumbnailFile(item.getString("thumbnail"),f.absolutePath)
+                    withContext(Dispatchers.Main){
+                        val ml= thumbnail?.let { File(it) }
+                        if (ml != null) {
+                            if (ml.exists()){
+                                val bitMapImage = BitmapFactory.decodeFile(thumbnail)
+                                holderView.images.setImageBitmap(bitMapImage)
+                            }else{
+                                println("not found")
+                                val bitmap = BitmapFactory.decodeResource(context.resources, R.drawable.ic_launcher_foreground)
+                                holderView.images.setImageBitmap(bitmap)
+                            }
+                        }
+                        /*val bitMapImage = BitmapFactory.decodeFile(thumbnail)
+                        holderView.images.setImageBitmap(bitMapImage)*/
+                    }
+                }
             }
-
         }
 
+    }
+    private fun getThumbnailFile(url: String,f:String): String? {
+        val file=File(f)
+        if (file.exists()){
+            return f
+        }
+        try {
+            val d_url = URL(url)
+            val bis = BufferedInputStream(d_url.openStream())
+            var count = 0
+            val b = ByteArray(1024)
+            val fos = FileOutputStream(file)
+            while (bis.read(b).also { count = it } != -1) {
+                fos.write(b, 0, count)
+            }
+            fos.close()
+            return file.absolutePath
+        } catch (e: java.io.IOException) {
+            e.printStackTrace()
+        }
+        return null
     }
 
     override fun getItemCount(): Int {
