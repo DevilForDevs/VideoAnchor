@@ -370,13 +370,15 @@ class DownloadsActivity : AppCompatActivity(),Adapter.OnItemClickListener {
         private fun progressiveDownloader(model: model, videoUrl: String, fos: FileOutputStream){
             val client = OkHttpClient()
             val bfo=BufferedOutputStream(fos)
-            val request = videoUrl.let {
-                val builder = Request.Builder().url(it)
+            val request = videoUrl.let { url ->
+                val builder = Request.Builder().url(url)
                 model.onDisk.let { downloaded ->
                     if (downloaded > 0) {
                         builder.addHeader("Range", "bytes=$downloaded-")
                     }
                 }
+                val userAgent = "Mozilla/5.0 (Linux; Android 11; SM-G991U) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/97.0.4692.99 Mobile Safari/537.36"
+                builder.addHeader("User-Agent", userAgent)
 
                 builder.build()
             }
@@ -392,10 +394,6 @@ class DownloadsActivity : AppCompatActivity(),Adapter.OnItemClickListener {
                         model.inRam= model.inRam.plus(bytesRead)
                     }
                 }
-                fos.close()
-                bfo.close()
-
-
             } catch (e: IOException) {
                 println("Download failed")
             }

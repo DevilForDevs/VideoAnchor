@@ -1,13 +1,12 @@
-import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
+
 import org.json.JSONObject
 import org.jsoup.Jsoup
 import java.io.IOException
 import java.net.URLEncoder
-import java.util.regex.Pattern
 
 class Interact {
     data class RequestVariant(
@@ -257,14 +256,6 @@ class Interact {
 
             )
     )
-    fun formatSpeed(speed: Long): String {
-        return when {
-            speed > 1e9 -> String.format("%.2f GB", speed / 1e9)
-            speed > 1e6 -> String.format("%.2f MB", speed / 1e6)
-            speed > 1e3 -> String.format("%.2f KB", speed / 1e3)
-            else -> String.format("%.2f B", speed)
-        }
-    }
     private fun encodeParams(params: Map<String, Any>): String {
         return params.entries.joinToString("&") { "${URLEncoder.encode(it.key, "UTF-8")}=${URLEncoder.encode(it.value.toString(), "UTF-8")}" }
     }
@@ -335,7 +326,7 @@ class Interact {
        return source.getJSONObject("continuationEndpoint").getJSONObject("continuationCommand").getString("token")
 
     }
-    private fun videoId(url: String): String? {
+    fun videoId(url: String): String? {
         val regex = """^.*(?:(?:youtu\.be\/|v\/|vi\/|u\/\w\/|embed\/|shorts\/|live\/)|(?:(?:watch)?\?v(?:i)?=|\&v(?:i)?=))([^#\&\?]*).*""".toRegex()
         val matchResult = regex.find(url)
         if (matchResult != null) {
@@ -451,13 +442,14 @@ class Interact {
         itemTo.put("videoId",js.getString("videoId"))
         return itemTo
     }
-    fun search(term:String,continuation:String?): Triple<MutableList<JSONObject>, String?, JSONArray>? {
+    fun search(term:String,continuation:String?): JSONObject? {
+        val allItems=JSONObject()
         val indexes= mutableListOf(0,1,4,7,8)
-        val videosCollected = mutableListOf<JSONObject>()
-        var nextContinuation=""
+        val videosCollected = JSONArray()
+        var nextContinuation:String?=null
         var sugggestion=  JSONArray()
         for (index in indexes){
-            val variant=variants[index]
+            val variant=variants[8]
             val client = OkHttpClient()
             val requestBody = variant.data
             if (continuation!=null){
@@ -479,7 +471,7 @@ class Interact {
                 .build()
             val response = client.newCall(request).execute()
             response.body.use { responseBody ->
-                val jsonResponse = JSONObject(responseBody.string())
+                val jsonResponse = JSONObject(responseBody!!.string())
                 if(jsonResponse.has("refinements")){
                     sugggestion=jsonResponse.getJSONArray("refinements")
                 }
@@ -499,17 +491,21 @@ class Interact {
                                     ite.put("duration","Unknown")
                                 }
                                 ite.put("thumbnail",s.getJSONObject("videoRenderer").getJSONObject("thumbnail").getJSONArray("thumbnails").getJSONObject(0).getString("url"))
-                                videosCollected.add(ite)
+                                videosCollected.put(ite)
 
 
                             }
                             if (s.has("reelShelfRenderer")){
                                 val videos=getreelShelfRenderer(s)
-                                videosCollected.addAll(videos)
+                                for (vip in videos){
+                                    videosCollected.put(vip)
+                                }
                             }
                             if (s.has("shelfRenderer")){
                                 val videos=getshelfRenderer(s)
-                                videosCollected.addAll(videos)
+                                for (vip in videos){
+                                    videosCollected.put(vip)
+                                }
                             }
 
                         }
@@ -539,7 +535,7 @@ class Interact {
                                     val itemTo=JSONObject()
                                     if (compactVideoRendere.getJSONObject(su).has("compactVideoRenderer")){
                                         val js=compactVideoRenderer(compactVideoRendere.getJSONObject(su))
-                                        videosCollected.add(js)
+                                        videosCollected.put(js)
                                     }
                                     if (compactVideoRendere.getJSONObject(su).has("videoWithContextRenderer")){
                                         val item=compactVideoRendere.getJSONObject(su).getJSONObject("videoWithContextRenderer")
@@ -551,12 +547,12 @@ class Interact {
                                         itemTo.put("thumbnail",getThumbnail(item.getJSONObject("thumbnail")))
                                         itemTo.put("videoId",item.getString("videoId"))
                                         itemTo.put("title",getTitle(item.getJSONObject("headline")))
-                                        videosCollected.add(itemTo)
+                                        videosCollected.put(itemTo)
                                     }
                                     if (compactVideoRendere.getJSONObject(su).has("elementRenderer")){
                                         if (compactVideoRendere.getJSONObject(su).getJSONObject("elementRenderer").getJSONObject("newElement").getJSONObject("type").has("componentType")){
                                             val item=elementRenderer(compactVideoRendere.getJSONObject(su))
-                                            videosCollected.add(item)
+                                            videosCollected.put(item)
 
                                         }
 
@@ -566,14 +562,14 @@ class Interact {
                             }
                             if (kitem.has("elementRenderer")){
                                 val item=elementRenderer((kitem))
-                                videosCollected.add(item)
+                                videosCollected.put(item)
                             }
                             if (kitem.has("shelfRenderer")){
                                 val items=kitem.getJSONObject("shelfRenderer").getJSONObject("content").getJSONObject("verticalListRenderer").getJSONArray("items")
                                 for (su in 0..<items.length()) {
                                     if (items.getJSONObject(su).has("elementRenderer")){
                                         val item=elementRenderer(items.getJSONObject(su))
-                                        videosCollected.add(item)
+                                        videosCollected.put(item)
                                     }
 
                                 }
@@ -582,6 +578,7 @@ class Interact {
                         }
                     }
                     if(jsonResponse.getJSONObject("contents").has("twoColumnSearchResultsRenderer")){
+                        println("twocolumbsea")
                         val sections=jsonResponse.getJSONObject("contents").getJSONObject("twoColumnSearchResultsRenderer").getJSONObject("primaryContents").getJSONObject("sectionListRenderer").getJSONArray("contents")
                         val collections=sections.getJSONObject(0).getJSONObject("itemSectionRenderer").getJSONArray("contents")
                         for (su in 0..<collections.length()) {
@@ -596,20 +593,25 @@ class Interact {
                                     ite.put("duration","Unknown")
                                 }
                                 ite.put("thumbnail",s.getJSONObject("videoRenderer").getJSONObject("thumbnail").getJSONArray("thumbnails").getJSONObject(0).getString("url"))
-                                videosCollected.add(ite)
+                                videosCollected.put(ite)
 
                             }
                             if (s.has("reelShelfRenderer")){
                                 val videos=getreelShelfRenderer(s)
-                                videosCollected.addAll(videos)
+                                for (vip in videos){
+                                    videosCollected.put(vip)
+                                }
                             }
                             if (s.has("shelfRenderer")){
                                 val videos=getshelfRenderer(s)
-                                videosCollected.addAll(videos)
+                                for (vip in videos){
+                                    videosCollected.put(vip)
+                                }
                             }
 
                         }
                         if (sections.length()>1){
+                            /*    println(sections.getJSONObject(1).getJSONObject("continuationItemRenderer").getJSONObject("continuationEndpoint").getJSONObject("continuationCommand").getString("token"))*/
                             nextContinuation=sections.getJSONObject(1).getJSONObject("continuationItemRenderer").getJSONObject("continuationEndpoint").getJSONObject("continuationCommand").getString("token")
                         }
                     }
@@ -621,11 +623,11 @@ class Interact {
                         val itemTo=JSONObject()
                         if (items.getJSONObject(su).has("compactVideoRenderer")){
                             val js=compactVideoRenderer(items.getJSONObject(su))
-                            videosCollected.add(js)
+                            videosCollected.put(js)
                         }
                         if (items.getJSONObject(su).has("elementRenderer")){
                             val item=elementRenderer(items.getJSONObject(su))
-                            videosCollected.add(item)
+                            videosCollected.put(item)
                         }
                     }
                     if(jsonResponse.getJSONObject("continuationContents").getJSONObject("sectionListContinuation").has("continuations")){
@@ -637,21 +639,24 @@ class Interact {
             if (!response.isSuccessful){
                response.close()
             }
-            if (videosCollected.size!=0){
-                val uniqueItemsVideo: MutableList<JSONObject> =videosCollected.distinctBy { it.get("videoId") }.toMutableList()
-                return Triple(uniqueItemsVideo,nextContinuation,sugggestion)
+            if (videosCollected.length()!=0){
+                allItems.put("videos",videosCollected)
+                allItems.put("nextContinuation",nextContinuation)
+                allItems.put("suggestion",sugggestion)
+                return allItems
             }
         }
         return null
 
     }
-    fun playlistVideoRendrer(source: JSONArray): Pair<MutableList<JSONObject>, String?>  {
-        val videos=mutableListOf<JSONObject>()
-        var continuation=""
+    fun playlistVideoRendrer(source: JSONArray): Pair<JSONArray, String?> {
+        val allitems=JSONObject()
+        val videos=JSONArray()
+        var continuation:String?=null
         for (su in 0..<source.length()) {
-            val ite=JSONObject()
             val item=source.getJSONObject(su)
             if (item.has("playlistVideoRenderer")){
+                val ite=JSONObject()
                 if (item.getJSONObject("playlistVideoRenderer").getJSONObject("lengthText").has("simpleText")){
                     ite.put("duration",item.getJSONObject("playlistVideoRenderer").getJSONObject("lengthText").get("simpleText"))
                 }
@@ -661,18 +666,49 @@ class Interact {
                 ite.put("thumbnail",getThumbnail(item.getJSONObject("playlistVideoRenderer").getJSONObject("thumbnail")))
                 ite.put("title",getTitle(item.getJSONObject("playlistVideoRenderer").getJSONObject("title")))
                 ite.put("videoId",item.getJSONObject("playlistVideoRenderer").get("videoId"))
+                videos.put(ite)
             }
+            if (item.has("richItemRenderer")){
+                val rl=item.getJSONObject("richItemRenderer").getJSONObject("content")
+                if (rl.has("videoWithContextRenderer")){
+                    val itemTo=JSONObject()
+                    val itemT=rl.getJSONObject("videoWithContextRenderer")
+                    if (item.has("lengthText")){
+                        itemTo.put("duration",getDuration(itemT.getJSONObject("lengthText")))
+                    }else{
+                        itemTo.put("duration","Unknown")
+                    }
+                    itemTo.put("thumbnail",getThumbnail(itemT.getJSONObject("thumbnail")))
+                    itemTo.put("videoId",itemT.getString("videoId"))
+                    itemTo.put("title",getTitle(itemT.getJSONObject("headline")))
+                    videos.put(itemTo)
+                }
+                if (rl.has("videoRenderer")){
+                    val ite=JSONObject()
+                    ite.put("videoId",rl.getJSONObject("videoRenderer").getString("videoId"))
+                    ite.put("title",txt2filename(rl.getJSONObject("videoRenderer").getJSONObject("title").getJSONArray("runs").getJSONObject(0).getString("text")))
+                    if (rl.getJSONObject("videoRenderer").has("lengthText")){
+                        ite.put("duration",rl.getJSONObject("videoRenderer").getJSONObject("lengthText").get("simpleText").toString())
+                    }else{
+                        ite.put("duration","Unknown")
+                    }
+                    ite.put("thumbnail",rl.getJSONObject("videoRenderer").getJSONObject("thumbnail").getJSONArray("thumbnails").getJSONObject(0).getString("url"))
+                    videos.put(ite)
+                }
+            }
+
             if (item.has("continuationItemRenderer")){
                val conti=getContinuation(item.getJSONObject("continuationItemRenderer"))
                 if (conti!=null){
                     continuation=conti
                 }
             }
-            videos.add(ite)
         }
+        allitems.put("videos",videos)
+        allitems.put("nextContinuation",continuation)
         return Pair(videos,continuation)
     }
-    fun streamingDataFromHtml(url: String){
+    fun getChannelId(url: String): String? {
         try {
             val doc = Jsoup.connect(url).get()
             val scriptTags = doc.select("script")
@@ -681,47 +717,22 @@ class Interact {
                 if (scriptContent.startsWith("var ytInitialData")) {
                     val jsonString = scriptContent.substringAfter("{").substringBeforeLast("}")
                     val jsonObject = JSONObject("{$jsonString}")
-                    /*secondaryResults, results, autoplay*/
-                    println(jsonObject)
-
+                    val cid=jsonObject.getJSONObject("metadata").getJSONObject("channelMetadataRenderer").getString("externalId")
+                    return cid
                 }
             }
 
-        } catch (e: IOException) {
-            println("Error fetching the web page: ${e.message}")
-
-        }
-
-    }
-    fun getPlayListItemsFromHtml(url: String):Pair<MutableList<JSONObject>, String?>?{
-        try {
-            val doc = Jsoup.connect(url).get()
-            val scriptTags = doc.select("script")
-            for (scriptTag in scriptTags) {
-                val scriptContent = scriptTag.data().trim()
-                if (scriptContent.startsWith("var ytInitialData")) {
-                    val jsonString = scriptContent.substringAfter("{").substringBeforeLast("}")
-                    val jsonObject = JSONObject("{$jsonString}")
-                    val contAndItems=jsonObject.getJSONObject("contents").getJSONObject("twoColumnBrowseResultsRenderer").getJSONArray("tabs").getJSONObject(0).getJSONObject("tabRenderer").getJSONObject("content").getJSONObject("sectionListRenderer").getJSONArray("contents").getJSONObject(0).getJSONObject("itemSectionRenderer").getJSONArray("contents").getJSONObject(0).getJSONObject("playlistVideoListRenderer").getJSONArray("contents")
-                    val videos=playlistVideoRendrer(contAndItems)
-                   if (videos.first.size!=0){
-                       return Pair(videos.first,videos.second)
-                   }
-
-                }
-            }
-
-        } catch (e: IOException) {
-            println("Error fetching the web page: ${e.message}")
+        } catch (e: Exception) {
             return null
         }
         return null
 
     }
-    fun playlist(continuation: String?): Pair<MutableList<JSONObject>, String?>? {
-        val videosCollected = mutableListOf<JSONObject>()
+    fun playlist(continuation: String?): JSONObject? {
+        val allItems=JSONObject()
+        var videosCollected = JSONArray()
         var nextContinuation:String?=null
-        val indedxes= mutableListOf(0,1,4,7,8)
+        val indedxes= mutableListOf(0,4,1,7,8)
         for (index in indedxes){
             val variant=variants[index]
             val client = OkHttpClient()
@@ -748,35 +759,129 @@ class Interact {
                 .post(requestBody.toString().toRequestBody())
                 .build()
             val response = client.newCall(request).execute()
-            response.body?.use { responseBody ->
-                val jsonResponse = JSONObject(responseBody.string())
+            response.body.use { responseBody ->
+                val jsonResponse = JSONObject(responseBody!!.string())
                 if (jsonResponse.has("onResponseReceivedActions")){
                     val sections=jsonResponse.getJSONArray("onResponseReceivedActions").getJSONObject(0).getJSONObject("appendContinuationItemsAction").getJSONArray("continuationItems")
                     val videos=playlistVideoRendrer(sections)
-                    videosCollected.addAll(videos.first)
+                    videosCollected=videos.first
                     nextContinuation=videos.second
                 }
                 if (jsonResponse.has("continuationContents")){
                     val cmpvi=jsonResponse.getJSONObject("continuationContents").getJSONObject("playlistVideoListContinuation")
                     val videos=playlistVideoRendrer(cmpvi.getJSONArray("contents"))
-                    videosCollected.addAll(videos.first)
+                    videosCollected=videos.first
                     nextContinuation=cmpvi.getJSONArray("continuations").getJSONObject(0).getJSONObject("nextContinuationData").getString("continuation")
                 }
 
             }
             if (!response.isSuccessful){
                 println("failed to get json")
-                response.close()
-                return null
             }
-            if (videosCollected.size!=0){
-                return Pair(videosCollected,nextContinuation)
+            if (videosCollected.length()!=0){
+                allItems.put("videos",videosCollected)
+                allItems.put("nextContinuation",nextContinuation)
+                return allItems
             }
         }
 
         return null
 
     }
+    fun getPlayListItemsFromHtml(url: String): JSONObject? {
+        val allItems=JSONObject()
+        try {
+            val doc = Jsoup.connect(url).get()
+            val scriptTags = doc.select("script")
+            for (scriptTag in scriptTags) {
+                val scriptContent = scriptTag.data().trim()
+                if (scriptContent.startsWith("var ytInitialData")) {
+                    val jsonString = scriptContent.substringAfter("{").substringBeforeLast("}")
+                    val jsonObject = JSONObject("{$jsonString}")
+                    try {
+                        val contAndItems=jsonObject.getJSONObject("contents").getJSONObject("twoColumnBrowseResultsRenderer").getJSONArray("tabs").getJSONObject(0).getJSONObject("tabRenderer").getJSONObject("content").getJSONObject("sectionListRenderer").getJSONArray("contents").getJSONObject(0).getJSONObject("itemSectionRenderer").getJSONArray("contents").getJSONObject(0)
+                        if (contAndItems.has("playlistVideoListRenderer")){
+                            val videos=playlistVideoRendrer(contAndItems.getJSONObject("playlistVideoListRenderer").getJSONArray("contents"))
+                            if (videos.first.length()!=0){
+                                allItems.put("videos",videos.first)
+                                allItems.put("nextContinuation",videos.second)
+                                return allItems
+                            }
+                        }
+                    }catch (e:Exception){
+                        return null
+                    }
+
+                }
+            }
+
+        } catch (e: IOException) {
+            println("Error fetching the web page: ${e.message}")
+            return null
+        }
+        return null
+
+    }
+    fun getFromChannelHtml(url: String): JSONObject? {
+        val cm=getChannelId(url)
+        val reUrl="https://www.youtube.com/channel/${cm}/videos"
+        val allItems=JSONObject()
+        val videosCollected = JSONArray()
+        var nextContinuation:String?=null
+        try {
+            val doc = Jsoup.connect(reUrl).get()
+            val scriptTags = doc.select("script")
+            for (scriptTag in scriptTags) {
+                val scriptContent = scriptTag.data().trim()
+                if (scriptContent.startsWith("var ytInitialData")) {
+                    val jsonString = scriptContent.substringAfter("{").substringBeforeLast("}")
+                    val jsonObject = JSONObject("{$jsonString}")
+                    val videos=jsonObject.getJSONObject("contents").getJSONObject("twoColumnBrowseResultsRenderer").getJSONArray("tabs").getJSONObject(1).getJSONObject("tabRenderer").getJSONObject("content").getJSONObject("richGridRenderer").getJSONArray("contents")
+                    for (l in 0..<videos.length()) {
+                        val v=videos.getJSONObject(l)
+                        if (v.has("richItemRenderer")){
+                            val ite=JSONObject()
+                            val rl=v.getJSONObject("richItemRenderer").getJSONObject("content")
+                            ite.put("videoId",rl.getJSONObject("videoRenderer").getString("videoId"))
+                            ite.put("title",txt2filename(rl.getJSONObject("videoRenderer").getJSONObject("title").getJSONArray("runs").getJSONObject(0).getString("text")))
+                            if (rl.getJSONObject("videoRenderer").has("lengthText")){
+                                ite.put("duration",rl.getJSONObject("videoRenderer").getJSONObject("lengthText").get("simpleText").toString())
+                            }else{
+                                ite.put("duration","Unknown")
+                            }
+                            ite.put("thumbnail",rl.getJSONObject("videoRenderer").getJSONObject("thumbnail").getJSONArray("thumbnails").getJSONObject(0).getString("url"))
+                            videosCollected.put(ite)
+                        }
+                        if (v.has("continuationItemRenderer")){
+                            nextContinuation=v.getJSONObject("continuationItemRenderer").getJSONObject("continuationEndpoint").getJSONObject("continuationCommand").getString("token")
+                        }
+
+                    }
+
+                }
+            }
+            allItems.put("videos",videosCollected)
+            allItems.put("nextContinuation",nextContinuation)
+            return allItems
+
+        } catch (e: IOException) {
+            println("Error fetching the web page: ${e.message}")
+            return null
+
+        }
+
+
+    }
+    fun formatSpeed(speedT: Long): String {
+        val speed=speedT.toDouble()
+        return when {
+            speed > 1e9 -> String.format("%.2f GB", speed / 1e9)
+            speed > 1e6 -> String.format("%.2f MB", speed / 1e6)
+            speed > 1e3 -> String.format("%.2f KB", speed / 1e3)
+            else -> String.format("%.2f B", speed)
+        }
+    }
+
 
 
 }
