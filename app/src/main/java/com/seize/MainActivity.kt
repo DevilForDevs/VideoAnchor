@@ -6,13 +6,18 @@ import android.Manifest
 import android.annotation.SuppressLint
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.drawable.ColorDrawable
 import android.os.Build
 import android.os.Bundle
+import android.print.PrintAttributes.Resolution
 import android.util.Patterns
+import android.view.Menu
+import android.view.MenuItem
 import android.view.View
 import android.webkit.URLUtil
 import android.widget.ArrayAdapter
 import android.widget.ImageButton
+import android.widget.LinearLayout
 import android.widget.ListView
 import android.widget.ProgressBar
 import android.widget.Toast
@@ -52,6 +57,7 @@ class MainActivity : AppCompatActivity(),AdapterMain.OnItemClickListener {
     var queryTerm: String? =null
     var canLoadMore=false
     var isPlaylist=false
+    var searchView:SearchView?=null
     var itemsL = mutableListOf<JSONObject>()
     var goToDownloadsActivity:ImageButton?=null
     private val videoIdAdded= mutableListOf<String>()
@@ -61,110 +67,12 @@ class MainActivity : AppCompatActivity(),AdapterMain.OnItemClickListener {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
-        val toolbar: Toolbar = findViewById(R.id.toolbarMain)
         recyclerView=findViewById(R.id.recy)
         progressBar=findViewById(R.id.pgb)
-        goToDownloadsActivity=findViewById(R.id.goToDownloads)
         val layoutManager = LinearLayoutManager(this)
         recyclerView!!.layoutManager=layoutManager
         adapter= AdapterMain(this,model_list_,this)
         recyclerView!!.adapter=adapter
-        setSupportActionBar(toolbar)
-        val searchView: SearchView = toolbar.findViewById(R.id.searchView)
-        searchView.setIconifiedByDefault(false)
-        goToDownloadsActivity!!.setOnClickListener{
-            val intent = Intent(this, DownloadsActivity::class.java)
-            startActivity(intent)
-        }
-        searchView.setOnQueryTextListener(object : SearchView.OnQueryTextListener {
-            override fun onQueryTextSubmit(query: String?): Boolean {
-                continuationToken=null
-                queryTerm=query.toString()
-                model_list_.clear()
-                adapter!!.notifyDataSetChanged()
-                search()
-                return true
-            }
-            override fun onQueryTextChange(newText: String?): Boolean {
-                if (newText.toString().isNotEmpty()&&canMakeRequest){
-                    model_list_.clear()
-                    adapter!!.notifyDataSetChanged()
-                    continuationToken=null
-                    val newTextString = newText.toString()
-                    val isValid = URLUtil.isValidUrl(newTextString) && Patterns.WEB_URL.matcher(newTextString).matches()
-                    if (isValid){
-                        println("url")
-                        val isId=mks(newTextString)
-                        if (isId==null){
-                            println("playlist/channel")
-                            progressBar!!.visibility = View.VISIBLE
-                            coroutineToGetJson.launch {
-                                val videos=executeRequest(newTextString)
-                                withContext(Dispatchers.Main){
-                                    if (videos!=null){
-                                        if (videos.has("videos")){
-                                            val mkv=videos.getJSONArray("videos")
-                                            isPlaylist=true
-                                            videoIdAdded.clear()
-                                            searchView.setQuery("", false)
-                                            println(mkv)
-                                            setToUi(mkv)
-                                        }
-                                        if (videos.has("nextContinuation")){
-                                            continuationToken = videos.getString("nextContinuation")
-                                        }
-                                    }
-                                }
-                            }
-                        }else{
-                            searchView.setQuery("", false)
-                        }
-                    }else{
-                        progressBar!!.visibility = View.VISIBLE
-                        model_list_.clear()
-                        videoIdAdded.clear()
-                        adapter!!.notifyDataSetChanged()
-                        println("getting results")
-                        canMakeRequest = false
-                        isPlaylist=false
-                        coroutToSearch.launch {
-                            try {
-                                val results = scrapper.search(newTextString, null)
-                                if (results!=null){
-                                    if (results.has("suggestion")){
-                                        val suggestions = results.getJSONArray("suggestion")
-                                        for (vu in 0..<suggestions.length()) {
-                                            val itemSuggestion = JSONObject()
-                                            itemSuggestion.put("suggestion", suggestions.get(vu))
-                                            model_list_.add(itemSuggestion)
-
-                                        }
-                                        withContext(Dispatchers.Main) {
-                                            adapter!!.notifyDataSetChanged()
-                                            progressBar!!.visibility = View.GONE
-                                        }
-                                    }
-                                }
-
-                            }catch (e:Exception){
-                                runOnUiThread {
-                                    Toast.makeText(applicationContext, "Failed to get result", Toast.LENGTH_SHORT).show()
-                                    searchView.setQuery("", false)
-                                    progressBar!!.visibility = View.GONE
-                                }
-
-                            }
-                        }
-                    }
-
-
-
-
-
-                }
-                return true
-            }
-        })
         recyclerView!!.addOnScrollListener(object : RecyclerView.OnScrollListener() {
             override fun onScrolled(recyclerView: RecyclerView, dx: Int, dy: Int) {
                 super.onScrolled(recyclerView, dx, dy)
@@ -299,70 +207,13 @@ class MainActivity : AppCompatActivity(),AdapterMain.OnItemClickListener {
             }
         }
     }
-    fun fromPlaylist(url: String){
-        progressBar!!.visibility=View.VISIBLE
-        model_list_.clear()
-        adapter?.notifyDataSetChanged()
-        coroutToSearch.launch {
-            var videos: JSONArray? = null
-            try {
-                val result = withContext(Dispatchers.IO) {
-                    scrapper.getPlayListItemsFromHtml(url)
-                }
-                if (result != null) {
-                    if (result.has("videos")){
-                        videos=result.getJSONArray("videos")
-                    }
-                    if (result.has("nextContinuation")){
-                        continuationToken = result.getString("nextContinuation")
-                    }
-                }
-                /*if (videos != null) {
-                    for (video in videos) {
-                        video.put("result", true)
-                        model_list_.add(video)
-                    }
-                }*/
-                withContext(Dispatchers.Main){
-                    if (videos != null) {
-                        setToUi(videos)
-                    }
-                }
-            }catch (e:Exception){
-                runOnUiThread {
-                    Toast.makeText(applicationContext, "Failed to get result", Toast.LENGTH_SHORT).show()
-                    progressBar!!.visibility = View.GONE
-                }
-            }
-        }
-    }
-
-    private fun getPlaylistId(newTextString: String): String? {
-        val parsedUrl = URL(newTextString)
-        val query = parsedUrl.query ?: return null
-        val parameters = query.split("&").associate {
-            val (key, value) = it.split("=")
-            key to value
-        }
-        return parameters["list"]
-
-    }
-
-    fun isUrl(url: String): Boolean {
-        try {
-            URL(url)
-            return true
-        }catch (e:Exception){
-            println(e)
-        }
-       return false
-    }
     override fun onItemClick(position: Int, item: JSONObject) {
         if (item.has("suggestion")){
             continuationToken=null
             queryTerm=item.getString("suggestion")
             model_list_.clear()
             adapter!!.notifyDataSetChanged()
+            searchView!!.setQuery("", false)
             search()
         }else{
             Toast.makeText(this,"Play feature not yet implemented",Toast.LENGTH_SHORT).show()
@@ -386,80 +237,221 @@ class MainActivity : AppCompatActivity(),AdapterMain.OnItemClickListener {
         }
 
     }
-
-    fun askResolution(infoJson:JSONObject){
-        if (infoJson.toString()==""){
-            println("failed to get json")
-        }else{
-            try {
-                val adaptiveFormats=infoJson.getJSONObject("streamingData").getJSONArray("adaptiveFormats")
-                var audio_length: Long? =null
-                var audio_url:String?=null
-                val map= HashMap<String,JSONObject>()
-                val dataList = mutableListOf<String>()
-                var c720:Long?=null
-                var c360:Long?=null
-                val dialogView = layoutInflater.inflate(R.layout.custom_dialog_layout, null)
-                val listView = dialogView.findViewById<ListView>(R.id.listView)
-                val isMuxingSupported = android.os.Build.VERSION.SDK_INT > android.os.Build.VERSION_CODES.N
-                for (i in adaptiveFormats.length() - 1 downTo 0) {
-                    val json2=JSONObject(adaptiveFormats[i].toString())
-                    println(json2)
-                    if ("audio/mp4" in json2.getString("mimeType").lowercase()){
-                        var text="(${scrapper.formatSpeed(json2.getString("contentLength").toLong())}) Audio bitrate(${scrapper.formatSpeed(json2.getInt("bitrate").toLong())}/s)"
-                        if (json2.getInt("itag")==140){
-                            audio_length=json2.getString("contentLength").toLong()
-                            if (json2.has("signatureCipher")){
-                                val cipher=json2.getString("signatureCipher")
-                                val url = cipher.split("&url=")[1]
-                                audio_url= URLDecoder.decode(url, "UTF-8")
-                            }else{
-                                audio_url=json2.getString("url")
-                            }
-                            audio_url=json2.getString("url")
-                            val thumbsUpEmoji = "\uD83D\uDC4D"
-                            text="(${scrapper.formatSpeed(json2.getString("contentLength").toLong())}) Audio bitrate(${scrapper.formatSpeed(json2.getInt("bitrate").toLong())}/s)$thumbsUpEmoji"
-                        }
-                        dataList.add(text)
-                        map.put(text,json2)
+    fun filterFormats(stremingData:JSONObject,selected:String): JSONObject? {
+        if (stremingData.has("adaptiveFormats")){
+            val progressives=stremingData.getJSONArray("formats")
+            for (i in 0..<progressives.length()) {
+                val json2=progressives.getJSONObject(i)
+                if (json2.has("qualityLabel")){
+                    if (json2.getString("qualityLabel").contains(selected)){
+                        return json2
                     }
-                    if("video/mp4" in json2.getString("mimeType").lowercase()){
-                        if ("avc" in json2.getString("mimeType")){
-                            val text="${json2.get("qualityLabel")}  (${scrapper.formatSpeed(json2.getString("contentLength").toLong()+ audio_length!!)}) video&audio"
-                            if (isMuxingSupported){
-                                dataList.add(text)
-                            }
-                            map.put(text,json2)
-                            if (json2.getString("qualityLabel").contains("360")){
-                                c360= json2.getString("contentLength").toLong()
-                            }
-                            if (json2.getString("qualityLabel").contains("720")){
-                                c720= json2.getString("contentLength").toLong()
-                            }
-                        }
-                    }
-                    if("video/webm" in json2.getString("mimeType").lowercase()){
-                        val resolutions = listOf(
-                            "144p",
-                            "240p",
-                            "360p",
-                            "480p",
-                            "720p",
-                            "1080p"
-                        )
-                        println(json2.get("qualityLabel"))
-                        if (json2.getString("qualityLabel")!in resolutions){
-                            val text="${json2.get("qualityLabel")}  (${scrapper.formatSpeed(json2.getString("contentLength").toLong()+ audio_length!!)}) vlc/mx player"
-                            if (isMuxingSupported){
-                                dataList.add(text)
-                            }
-                            map[text] = json2
+                }
+            }
+        }
+        if (stremingData.has("adaptiveFormats")){
+            val highResolution = mutableListOf(
+                "1440p",
+                "2160p"
+            )
+            var mks:JSONObject?=null
+            var audio_length: Long? =null
+            var audio_url:String?=null
+            var videoUrl:String?=null
+            val adaptiveFormats=stremingData.getJSONArray("adaptiveFormats")
+            for (i in adaptiveFormats.length() - 1 downTo 0) {
+                val json2=adaptiveFormats.getJSONObject(i)
+                if (json2.getString("mimeType").contains("audio/mp4")){
+                    if (json2.getInt("itag") == 140) {
+                        audio_url = json2.getString("url")
+                        audio_length = json2.getString("contentLength").toLong()
+                        if (selected == "Audio") {
+                            return json2
                         }
                     }
                 }
-                val adapter = ArrayAdapter(this@MainActivity, android.R.layout.simple_list_item_1, dataList)
-                listView.adapter = adapter
-                val progressiveFormats=infoJson.getJSONObject("streamingData").getJSONArray("formats")
+                if (json2.has("qualityLabel")){
+                    if (json2.getString("mimeType").contains("avc1")){
+                        if (json2.getString("qualityLabel").contains(selected)){
+                            mks=adaptiveFormats.getJSONObject(i)
+                            mks.put("audio",audio_url)
+                            mks.put("audiolength",audio_length)
+                            return mks
+                        }
+                    }
+                    if (json2.getString("mimeType").contains("webm")){
+                        if (json2.getString("qualityLabel") in highResolution){
+                            if (json2.getString("qualityLabel").contains(selected)){
+                                mks=adaptiveFormats.getJSONObject(i)
+                                mks.put("audio",audio_url)
+                                mks.put("audiolength",audio_length)
+                                return mks
+                            }
+                        }else{
+                            adaptiveFormats.remove(i)
+                        }
+                    }
+                }
+            }
+            mks=adaptiveFormats.getJSONObject(0)
+            mks.put("audio",audio_url)
+            mks.put("audiolength",audio_length)
+            return mks
+
+        }
+        return null
+    }
+    fun askCommanResolution(){
+        val dialogView = layoutInflater.inflate(R.layout.custom_dialog_layout, null)
+        val listView = dialogView.findViewById<ListView>(R.id.listView)
+        val dataList = mutableListOf(
+            "Audio",
+            "240p",
+            "360p",
+            "480p",
+            "720p",
+            "1080p",
+            "1440p vlc/mx player",
+            "2160p vlc/mx player"
+        )
+        val adapter = ArrayAdapter(this@MainActivity, android.R.layout.simple_list_item_1, dataList)
+        listView.adapter = adapter
+        adapter.notifyDataSetChanged()
+        var alertDialog: AlertDialog? = null
+        val builder = AlertDialog.Builder(this@MainActivity)
+        listView.setOnItemClickListener { parent, view, position, id ->
+            alertDialog?.dismiss()
+            val selectedItem = dataList[position].replace(" vlc/mx player","")
+            for (item in model_list_){
+                coroutineToGetJson.launch{
+                    try {
+                        val infoJson=scrapper.getStreamingData(item.getString("videoId"))
+                        val streamingData= infoJson?.getJSONObject("streamingData")
+                        if (streamingData != null) {
+                            val resolution=filterFormats(streamingData,selectedItem)
+                            val title2=scrapper.txt2filename(infoJson.getJSONObject("videoDetails").getString("title"))
+                            val thumbnail=infoJson.getJSONObject("videoDetails").getJSONObject("thumbnail").getJSONArray("thumbnails").getJSONObject(2).getString("url")
+
+                            val infol= mutableListOf<JSONObject>()
+                            if (resolution != null) {
+                                resolution.put("videoId",infoJson.getJSONObject("videoDetails").getString("videoId"))
+                                resolution.put("thumbnail",thumbnail)
+                                resolution.put("title",title2)
+                                infol.add(resolution)
+                            }
+                            runOnUiThread {
+                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                                    DownloadsActivity.myStaticFunction(applicationContext,infol)
+                                    Toast.makeText(applicationContext,"Added To Downloads",Toast.LENGTH_SHORT).show()
+                                }else{
+                                    if (ContextCompat.checkSelfPermission(
+                                            this@MainActivity,
+                                            Manifest.permission.WRITE_EXTERNAL_STORAGE
+                                        ) != PackageManager.PERMISSION_GRANTED
+                                    ) {
+                                        itemsL=infol
+                                        val permission = Manifest.permission.WRITE_EXTERNAL_STORAGE
+                                        Toast.makeText(applicationContext,"Give Permission and try again",Toast.LENGTH_SHORT).show()
+                                        ActivityCompat.requestPermissions(this@MainActivity, arrayOf(permission), 1)
+                                    }else{
+                                        DownloadsActivity.myStaticFunction(applicationContext,infol)
+                                        Toast.makeText(applicationContext,"Added To Downloads",Toast.LENGTH_SHORT).show()
+                                    }
+                                }
+                            }
+                        }
+                    }catch (e:Exception){
+                        runOnUiThread {
+                            progressBar!!.visibility=View.GONE
+                            Toast.makeText(applicationContext,"Streaming data not found",Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                }
+            }
+            println(selectedItem)
+        }
+        builder.setView(dialogView as View)
+            .setTitle("Select Common Resolution")
+            .setNegativeButton("Cancel") { dialog, _ ->
+                dialog.dismiss()
+                Toast.makeText(applicationContext,"Paste url and again and select format",Toast.LENGTH_SHORT).show()
+            }
+        alertDialog = builder.create()
+        alertDialog.show()
+    }
+
+    fun askResolution(infoJson:JSONObject){
+       val streamingData=infoJson.getJSONObject("streamingData")
+        if (streamingData.has("adaptiveFormats")){
+            val adaptiveFormats=streamingData.getJSONArray("adaptiveFormats")
+            var audio_length: Long? =null
+            var audio_url:String?=null
+            val map= HashMap<String,JSONObject>()
+            val dataList = mutableListOf<String>()
+            var c720:Long?=null
+            var c360:Long?=null
+            val dialogView = layoutInflater.inflate(R.layout.custom_dialog_layout, null)
+            val listView = dialogView.findViewById<ListView>(R.id.listView)
+            val isMuxingSupported = android.os.Build.VERSION.SDK_INT > android.os.Build.VERSION_CODES.N
+            for (i in adaptiveFormats.length() - 1 downTo 0) {
+                val json2=JSONObject(adaptiveFormats[i].toString())
+                println(json2)
+                if ("audio/mp4" in json2.getString("mimeType").lowercase()){
+                    var text="(${scrapper.formatSpeed(json2.getString("contentLength").toLong())}) Audio bitrate(${scrapper.formatSpeed(json2.getInt("bitrate").toLong())}/s)"
+                    if (json2.getInt("itag")==140){
+                        audio_length=json2.getString("contentLength").toLong()
+                        if (json2.has("signatureCipher")){
+                            val cipher=json2.getString("signatureCipher")
+                            val url = cipher.split("&url=")[1]
+                            audio_url= URLDecoder.decode(url, "UTF-8")
+                        }else{
+                            audio_url=json2.getString("url")
+                        }
+                        audio_url=json2.getString("url")
+                        val thumbsUpEmoji = "\uD83D\uDC4D"
+                        text="(${scrapper.formatSpeed(json2.getString("contentLength").toLong())}) Audio bitrate(${scrapper.formatSpeed(json2.getInt("bitrate").toLong())}/s)$thumbsUpEmoji"
+                    }
+                    dataList.add(text)
+                    map.put(text,json2)
+                }
+                if("video/mp4" in json2.getString("mimeType").lowercase()){
+                    if ("avc" in json2.getString("mimeType")){
+                        val text="${json2.get("qualityLabel")}  (${scrapper.formatSpeed(json2.getString("contentLength").toLong()+ audio_length!!)}) video&audio"
+                        if (isMuxingSupported){
+                            dataList.add(text)
+                        }
+                        map.put(text,json2)
+                        if (json2.getString("qualityLabel").contains("360")){
+                            c360= json2.getString("contentLength").toLong()
+                        }
+                        if (json2.getString("qualityLabel").contains("720")){
+                            c720= json2.getString("contentLength").toLong()
+                        }
+                    }
+                }
+                if("video/webm" in json2.getString("mimeType").lowercase()){
+                    val resolutions = listOf(
+                        "144p",
+                        "240p",
+                        "360p",
+                        "480p",
+                        "720p",
+                        "1080p"
+                    )
+                    println(json2.get("qualityLabel"))
+                    if (json2.getString("qualityLabel")!in resolutions){
+                        val text="${json2.get("qualityLabel")}  (${scrapper.formatSpeed(json2.getString("contentLength").toLong()+ audio_length!!)}) vlc/mx player"
+                        if (isMuxingSupported){
+                            dataList.add(text)
+                        }
+                        map[text] = json2
+                    }
+                }
+            }
+            val adapter = ArrayAdapter(this@MainActivity, android.R.layout.simple_list_item_1, dataList)
+            listView.adapter = adapter
+            if (streamingData.has("formats")){
+                val progressiveFormats=streamingData.getJSONArray("formats")
                 for (i in 0 until progressiveFormats.length()) {
                     val json2=JSONObject(progressiveFormats[i].toString())
                     println(json2)
@@ -487,59 +479,58 @@ class MainActivity : AppCompatActivity(),AdapterMain.OnItemClickListener {
 
 
                 }
-                val infol= mutableListOf<JSONObject>()
-                var alertDialog: AlertDialog? = null
-                val title2=scrapper.txt2filename(infoJson.getJSONObject("videoDetails").getString("title"))
-                val thumbnail=infoJson.getJSONObject("videoDetails").getJSONObject("thumbnail").getJSONArray("thumbnails").getJSONObject(2).getString("url")
-                listView.setOnItemClickListener { parent, view, position, id ->
-                    alertDialog?.dismiss()
-                    val selectedItem = dataList[position]
-                    val mjs=map.get(selectedItem)
-                    if (mjs != null) {
-                        mjs.put("audio",audio_url)
-                        mjs.put("title",title2)
-                        mjs.put("thumbnail",thumbnail)
-                        mjs.put("audiolength",audio_length)
-                        mjs.put("videoId",infoJson.getJSONObject("videoDetails").getString("videoId"))
-                        infol.add(mjs)
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            }
+            val infol= mutableListOf<JSONObject>()
+            var alertDialog: AlertDialog? = null
+            val title2=scrapper.txt2filename(infoJson.getJSONObject("videoDetails").getString("title"))
+            val thumbnail=infoJson.getJSONObject("videoDetails").getJSONObject("thumbnail").getJSONArray("thumbnails").getJSONObject(2).getString("url")
+            listView.setOnItemClickListener { parent, view, position, id ->
+                alertDialog?.dismiss()
+                val selectedItem = dataList[position]
+                val mjs=map.get(selectedItem)
+                if (mjs != null) {
+                    mjs.put("audio",audio_url)
+                    mjs.put("title",title2)
+                    mjs.put("thumbnail",thumbnail)
+                    mjs.put("audiolength",audio_length)
+                    mjs.put("videoId",infoJson.getJSONObject("videoDetails").getString("videoId"))
+                    infol.add(mjs)
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                        DownloadsActivity.myStaticFunction(applicationContext,infol)
+                        Toast.makeText(applicationContext,"Added To Downloads",Toast.LENGTH_SHORT).show()
+                    }else{
+                        if (ContextCompat.checkSelfPermission(
+                                this@MainActivity,
+                                Manifest.permission.WRITE_EXTERNAL_STORAGE
+                            ) != PackageManager.PERMISSION_GRANTED
+                        ) {
+                            itemsL=infol
+                            val permission = Manifest.permission.WRITE_EXTERNAL_STORAGE
+                            Toast.makeText(applicationContext,"Give Permission and try again",Toast.LENGTH_SHORT).show()
+                            ActivityCompat.requestPermissions(this@MainActivity, arrayOf(permission), 1)
+                        }else{
                             DownloadsActivity.myStaticFunction(applicationContext,infol)
                             Toast.makeText(applicationContext,"Added To Downloads",Toast.LENGTH_SHORT).show()
-                        }else{
-                            if (ContextCompat.checkSelfPermission(
-                                    this@MainActivity,
-                                    Manifest.permission.WRITE_EXTERNAL_STORAGE
-                                ) != PackageManager.PERMISSION_GRANTED
-                            ) {
-                                itemsL=infol
-                                val permission = Manifest.permission.WRITE_EXTERNAL_STORAGE
-                                Toast.makeText(applicationContext,"Give Permission and try again",Toast.LENGTH_SHORT).show()
-                                ActivityCompat.requestPermissions(this@MainActivity, arrayOf(permission), 1)
-                            }else{
-                                DownloadsActivity.myStaticFunction(applicationContext,infol)
-                                Toast.makeText(applicationContext,"Added To Downloads",Toast.LENGTH_SHORT).show()
-                            }
                         }
                     }
+                }
 
-                }
-                val builder = AlertDialog.Builder(this@MainActivity)
-                var tile="Muxing not supported on this device"
-                if (isMuxingSupported){
-                    tile="* Require merging"
-                }
-                builder.setView(dialogView as View)
-                    .setTitle(tile)
-                    .setNegativeButton("Cancel") { dialog, _ ->
-                        dialog.dismiss()
-                        Toast.makeText(applicationContext,"Paste url and again and select format",Toast.LENGTH_SHORT).show()
-                    }
-                alertDialog = builder.create()
-                alertDialog.show()
-            }catch (e:Exception){
-                e.printStackTrace()
             }
+            val builder = AlertDialog.Builder(this@MainActivity)
+            var tile="Muxing not supported on this device"
+            if (isMuxingSupported){
+                tile="* Require merging"
+            }
+            builder.setView(dialogView as View)
+                .setTitle(tile)
+                .setNegativeButton("Cancel") { dialog, _ ->
+                    dialog.dismiss()
+                    Toast.makeText(applicationContext,"Paste url and again and select format",Toast.LENGTH_SHORT).show()
+                }
+            alertDialog = builder.create()
+            alertDialog.show()
         }
+
 
     }
 
@@ -596,6 +587,7 @@ class MainActivity : AppCompatActivity(),AdapterMain.OnItemClickListener {
 
                     }
                     canLoadMore=true
+                    canMakeRequest=true
                     if (result != null) {
                         if (result.has("videos")){
                             videos = result.getJSONArray("videos")
@@ -770,5 +762,117 @@ class MainActivity : AppCompatActivity(),AdapterMain.OnItemClickListener {
             "$key=${URLEncoder.encode(value.toString(), "UTF-8")}"
         }
         return "$baseUrl?$queryString"
+    }
+    override fun onCreateOptionsMenu(menu: Menu): Boolean {
+        menuInflater.inflate(R.menu.mainmenu, menu)
+        val searchItem = menu.findItem(R.id.search_bar)
+        searchView = searchItem.actionView as SearchView?
+      /*  searchView?.isIconified = false
+        supportActionBar?.setDisplayHomeAsUpEnabled(true)*/
+        supportActionBar?.setDisplayShowTitleEnabled(false)
+        supportActionBar?.setBackgroundDrawable(ColorDrawable(resources.getColor(R.color.purple_200)))
+        searchView?.setOnQueryTextListener(object : SearchView.OnQueryTextListener {
+            override fun onQueryTextSubmit(query: String): Boolean {
+                continuationToken=null
+                queryTerm=query.toString()
+                model_list_.clear()
+                adapter?.notifyDataSetChanged()
+                searchView!!.setQuery("", false)
+                search()
+                return true
+            }
+            override fun onQueryTextChange(newText: String): Boolean {
+                println(newText)
+                if (newText.toString().isNotEmpty()&&canMakeRequest){
+                    model_list_.clear()
+                    adapter!!.notifyDataSetChanged()
+                    continuationToken=null
+                    val newTextString = newText.toString()
+                    val isValid = URLUtil.isValidUrl(newTextString) && Patterns.WEB_URL.matcher(newTextString).matches()
+                    if (isValid){
+                        println("url")
+                        val isId=mks(newTextString)
+                        if (isId==null){
+                            println("playlist/channel")
+                            progressBar!!.visibility = View.VISIBLE
+                            coroutineToGetJson.launch {
+                                val videos=executeRequest(newTextString)
+                                withContext(Dispatchers.Main){
+                                    if (videos!=null){
+                                        if (videos.has("videos")){
+                                            val mkv=videos.getJSONArray("videos")
+                                            isPlaylist=true
+                                            videoIdAdded.clear()
+                                            searchView!!.setQuery("", false)
+                                            println(mkv)
+                                            setToUi(mkv)
+                                        }
+                                        if (videos.has("nextContinuation")){
+                                            continuationToken = videos.getString("nextContinuation")
+                                        }
+                                    }
+                                }
+                            }
+                        }else{
+                            searchView!!.setQuery("", false)
+                        }
+                    }else{
+                        progressBar!!.visibility = View.VISIBLE
+                        model_list_.clear()
+                        videoIdAdded.clear()
+                        adapter!!.notifyDataSetChanged()
+                        println("getting results")
+                        canMakeRequest = false
+                        isPlaylist=false
+                        coroutToSearch.launch {
+                            try {
+                                val results = scrapper.search(newTextString, null)
+                                if (results!=null){
+                                    if (results.has("suggestion")){
+                                        val suggestions = results.getJSONArray("suggestion")
+                                        for (vu in 0..<suggestions.length()) {
+                                            val itemSuggestion = JSONObject()
+                                            itemSuggestion.put("suggestion", suggestions.get(vu))
+                                            model_list_.add(itemSuggestion)
+
+                                        }
+                                        canMakeRequest=true
+                                        withContext(Dispatchers.Main) {
+                                            adapter!!.notifyDataSetChanged()
+                                            progressBar!!.visibility = View.GONE
+
+                                        }
+                                    }
+                                }
+
+                            }catch (e:Exception){
+                                runOnUiThread {
+                                    Toast.makeText(applicationContext, "Failed to get result", Toast.LENGTH_SHORT).show()
+                                    searchView!!.setQuery("", false)
+                                    progressBar!!.visibility = View.GONE
+                                }
+
+                            }
+                        }
+                    }
+                }
+                return true
+            }
+        })
+        return true
+    }
+    override fun onOptionsItemSelected(item: MenuItem): Boolean {
+        return when (item.itemId) {
+            R.id.downloadAll -> {
+               askCommanResolution()
+                true
+            }
+            R.id.downloads -> {
+                val intent = Intent(this, DownloadsActivity::class.java)
+                startActivity(intent)
+                true
+            }
+            else -> super.onOptionsItemSelected(item)
+        }
     }
 }

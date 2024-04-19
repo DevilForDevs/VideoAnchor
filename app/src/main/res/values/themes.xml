@@ -4,5 +4,8 @@
         <!-- Customize your light theme here. -->
         <!-- <item name="colorPrimary">@color/my_light_primary</item> -->
     </style>
-    <style name="Theme.Seize" parent="Base.Theme.Seize" />
+    <style name="Theme.Seize" parent="Base.Theme.Seize"/>
+    <style name="AppTheme" parent="Theme.MaterialComponents.Light.DarkActionBar">
+        <item name="colorPrimary">#FF0000</item> <!-- Set your desired background color here -->
+    </style>
 </resources>

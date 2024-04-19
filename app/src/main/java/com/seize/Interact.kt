@@ -260,10 +260,10 @@ class Interact {
         return params.entries.joinToString("&") { "${URLEncoder.encode(it.key, "UTF-8")}=${URLEncoder.encode(it.value.toString(), "UTF-8")}" }
     }
     fun getStreamingData(videoId:String): JSONObject? {
-        for ( variant in variants){
+        val indexes= mutableListOf(1,5,6,7,8,9,10,11)
+        for ( clientIndex in indexes){
+            val variant=variants[clientIndex]
             val keY= variant.query["key"].toString()
-            /*not provides 4k ANDROID_CREATOR,IOS_CREATOR,IOS_MESSAGES_EXTENSION,IOS,android music,IOS_MUSIC,web remix*/
-            /*unciphered urls IOS_MESSAGES_EXTENSION,ios,android music,IOS_MUSIC,IOS_CREATOR,ANDROID_CREATOR,ANDROID_EMBEDDED_PLAYER*/
             val url = "https://www.youtube.com/youtubei/v1/player?${encodeParams(mapOf("videoId" to videoId, "key" to keY, "contentCheckOk" to true, "racyCheckOk" to true))}"
             val requestBody = variant.data.toString()
             val request = Request.Builder()
@@ -279,7 +279,7 @@ class Interact {
             println(variant.data.get("context"))
             val client = OkHttpClient()
             val response = client.newCall(request).execute()
-            response.body?.use { responseBody ->
+            response.body.use { responseBody ->
                 val jsonResponse = JSONObject(responseBody.string())
                 if (jsonResponse.has("streamingData")){
                     val streamingData=jsonResponse.getJSONObject("streamingData")
@@ -288,9 +288,6 @@ class Interact {
                         for (index in 0..<adaptiveFormats.length()) {
                             if(adaptiveFormats.getJSONObject(index).has("url")){
                                 return jsonResponse
-                            }else{
-                                println("ciphered url")
-
                             }
                         }
                     }
@@ -299,14 +296,9 @@ class Interact {
                         for (index in 0..<adaptiveFormats.length()) {
                             if(adaptiveFormats.getJSONObject(index).has("url")){
                                 return jsonResponse
-                            }else{
-                                println("ciphered url")
-
                             }
                         }
                     }
-                }else{
-                    return null
                 }
 
             }
@@ -449,7 +441,7 @@ class Interact {
         var nextContinuation:String?=null
         var sugggestion=  JSONArray()
         for (index in indexes){
-            val variant=variants[8]
+            val variant=variants[index]
             val client = OkHttpClient()
             val requestBody = variant.data
             if (continuation!=null){
@@ -760,7 +752,7 @@ class Interact {
                 .build()
             val response = client.newCall(request).execute()
             response.body.use { responseBody ->
-                val jsonResponse = JSONObject(responseBody!!.string())
+                val jsonResponse = JSONObject(responseBody.string())
                 if (jsonResponse.has("onResponseReceivedActions")){
                     val sections=jsonResponse.getJSONArray("onResponseReceivedActions").getJSONObject(0).getJSONObject("appendContinuationItemsAction").getJSONArray("continuationItems")
                     val videos=playlistVideoRendrer(sections)

@@ -6,7 +6,7 @@
     xmlns:app="http://schemas.android.com/apk/res-auto"
     tools:context=".MainActivity"
     android:orientation="vertical">
-    <androidx.appcompat.widget.Toolbar
+    <!--<androidx.appcompat.widget.Toolbar
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layoutDirection="ltr"
@@ -32,7 +32,7 @@
                 android:background="@color/purple_200">
             </ImageButton>
         </LinearLayout>
-    </androidx.appcompat.widget.Toolbar>
+    </androidx.appcompat.widget.Toolbar>-->
     <ProgressBar
         android:id="@+id/pgb"
         android:layout_width="match_parent"
